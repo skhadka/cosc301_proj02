@@ -12,9 +12,13 @@
 #include <signal.h>
 
 int mode = 1;
+int actual_mode = 1;
 int ex = 1;
 
+
+/* Make array of commands */
 char ***command(char * buffer) {//return array of addresses, that contains array of strings
+
 	char *sep_command = ";\n"; //commands seperated by ; and \n
 	char *word, *tmp;
 	int command_count = 0;		
@@ -39,7 +43,7 @@ char ***command(char * buffer) {//return array of addresses, that contains array
 	
 	char *sep_spc = " \t";
 	int command_size[command_count]; //keep count of size of each command
-	memset (command_size, 0, sizeof(command_size)); //initialize array with width of command 
+	memset (command_size, 0, sizeof(command_size+1)); //initialize array with width of command 
 
 	int actual_command_count = 0;
 	for (i=0; i<command_count; i++) { 
@@ -51,18 +55,22 @@ char ***command(char * buffer) {//return array of addresses, that contains array
 		}
 		free(s);
 		command_size[i] = count;
-		if(count!=0) actual_command_count ++;
+		if(count!=0) actual_command_count++;
 	}
 
 	if (actual_command_count==0) return NULL; 
+
 	char *** command = (char ***) malloc (sizeof(char **)*(actual_command_count+1));
-	memset (command, 0, sizeof(command)); //initialize all!!
-	printf("\n\n---WORKS till here---\n\n");
+	//memset (command, 0, sizeof(command)); //initialize all!!
+
 	int command_index = 0;
 	for (i=0; i<command_count; i++) { //make array of commands and free previous commmand with spc
-		if (command_size[i]==0) {free (command_spc[i]); continue;}
+		if (command_size[i]==0) {
+			free (command_spc[i]); 
+			continue;
+		}
 		command[command_index] = (char **)malloc(sizeof(char *) * (command_size[i]+1));
-		memset (command[command_index], 0, sizeof(command[command_index]));
+		//memset (command[command_index], 0, sizeof(command[command_index]));
 		int j=0;
 		char *s = strdup(command_spc[i]);
 		word = strtok_r(s, sep_spc, &tmp);
@@ -74,57 +82,111 @@ char ***command(char * buffer) {//return array of addresses, that contains array
 		free(s);
 		command_index++;
 		free(command_spc[i]);
-	} //all command_spc are freed!
+	} 
+	free(command_spc[i]);//all command_spc are freed!
 	command[command_index] = NULL;	
-	
-	printf("\n----print elements in command----\n");
-	
-	//check if this worked!!
-	for(i=0; i<actual_command_count; i++)	{
-		int j=0;
-		printf("\nCommand %d: ",i);
-		while(command[i][j]!=NULL) {
-			printf("%s ",command[i][j]);
-			j++;
-		}
-	}
-	printf("\n--WORKING SO FAR--\n");
+		
 	return command;	 
 }
 
-void set_mode(char ** command) { 
-	//mode = m;
+
+/* Set global mode variable */
+void set_mode(char ** command) {
+ 
+	if (command[1]==NULL) { //print mode
+		if (actual_mode==1) printf("\tMode is Sequential--\n");
+		if (actual_mode==0) printf("\tMode is Parallel--\n");
+		return;
+	}
+	
+	if (command[2]!=NULL) { 
+		printf("\tError! Incorrect parameters for mode function!\n"); 
+		return; 
+	}
+
+	if ((strcasecmp(command[1],"parallel")==0) || (strcasecmp(command[1],"p")==0)) {
+		mode = 0; //set global mode varible to 0: parallel
+		return;
+	}
+
+	if ((strcasecmp(command[1],"sequential")==0) || (strcasecmp(command[1],"s")==0)) {
+		mode = 1; //set global mode variable to 1: sequential
+		return;
+	}
+
+	printf("\tError! Incorrect parameters for mode function!\n");
 }
 
-void set_exit(int e) {
-	//ex = e;
+
+/* Set global exit variable */
+void set_exit(char ** command) {
+	if (command[1]!=NULL) { printf("\tError! Incorrect parameters for exit function!\n"); return;}
+	ex = 0; //set global exit variable to 0 
 }
 
+
+/* Run commands in Sequential mode */
 void execute_sequential(char ***command) {
+
 	int command_index = 0;
 	while(command[command_index]!=NULL) { //execute commands
-		printf("\n--- Executing command %d: %s ---",command_index, command[command_index][0]);
-		//check for mode/exit command before this...
-				
-		if 
+		
+		if (strcasecmp(command[command_index][0],"mode")==0) { //check mode
+			printf("Executing command %d: %s\n",command_index, command[command_index][0]);
+			set_mode(command[command_index]);
+			command_index++; //while loop!
+			continue;
+		}
 
-	        //execv just exits once its done! hence must call a child process
+		if (strcasecmp(command[command_index][0],"exit")==0) { //check exit
+			printf("Executing command %d: %s\n",command_index, command[command_index][0]);
+			set_exit(command[command_index]);
+			command_index++; //while loop!
+			continue;
+		}	
+	
+	       //execv just exits once its done! hence must call a child process
 		pid_t pid = fork();
 		int childrv;
 		if (pid>0) waitpid(pid, &childrv, 0); //if parent wait for the child to be executed before continuing
-		if (pid==0) { //if child execute command
+		if (pid==0) { //make child execute command
+			printf("\nExecuting command %d: %s\n",command_index, command[command_index][0]);
 			if(execv(command[command_index][0],command[command_index]) < 0) {
-				printf("\nError! Command not found!: %s\n", command[command_index][0]);
+				printf("\tError! Command not found!: %s\n", command[command_index][0]);
+				exit(-1); //have to stop the child process! kill it.. 
 			}
-			//return; //have to return once child is done executing only happens when error --do not need to return?? but child is in a loop check! 
 		}
-	command_index++;
-        
+	command_index++;      
 	}
 }
 
+
+/* Run commands in Parallel mode */
 void execute_parallel(char *** command) {
+	printf("---IN PARALLEL---");
+	
 }
+
+
+/* Free command array */ 
+void free_array(char *** command_array) {
+			int i = 0;
+		while (command_array[i]!=NULL) {
+			int j = 0;
+			while(command_array[i][j]!=NULL) {
+				free(command_array[i][j]);
+				j++;
+			}	
+			free(command_array[i][j]);
+			free(command_array[i]);
+			i++;
+		}
+		free(command_array[i]);
+}
+
+
+/* --------------------------------------------MAIN------------------------------------------------------------ */
+ 
 int main(int argc, char **argv) {
   
 	printf("%s","prompt:> ");
@@ -133,14 +195,19 @@ int main(int argc, char **argv) {
 	while(fgets(buffer, 1024, stdin)!=NULL) { 
 
 		//make an array of commands	
-		char ***command_array = command(buffer);
-		if (command_array==NULL) continue; //no commands to be executed
+		char ***command_array = command(buffer); //recall it returns malloced stuff so have to free it!
+		if (command_array==NULL) {printf("\n%s","prompt:> "); continue;} //no commands to be executed
 		
-		if (mode) execute_sequential(command_array);
+		if (actual_mode) execute_sequential(command_array);
 		else execute_parallel(command_array);
-		
+		free_array(command_array);
+		free(command_array);
+		actual_mode = mode; //set actual mode to the interm one assigned by set_mode fxn
+		if (!ex) break; //break if global exit set to 0
+		printf("\n%s","prompt:> ");
+		fflush(stdout); 	
 	}
-
+	printf("\n\n------------------------Finished Execution!------------------------\n\n");
 	return 0;
 }
 
