@@ -163,8 +163,49 @@ void execute_sequential(char ***command) {
 
 /* Run commands in Parallel mode */
 void execute_parallel(char *** command) {
-	printf("---IN PARALLEL---");
+	printf("---IN PARALLEL---\n");
+	int command_index = 0;
+	int children = 0;
+
+	//first count the number of execv commands in array as we'd need to make those many child processes
+	while (command[command_index]!=NULL) {
+		if ((strcasecmp(command[command_index][0],"mode")!=0) && (strcasecmp(command[command_index][0],"exit")!=0)) children++;
+		command_index++;
+	}
+
+	command_index = 0;
+	while(command[command_index]!=NULL) { //execute commands	
 	
+		if (strcasecmp(command[command_index][0],"mode")==0) { //check mode
+			printf("Executing command %d: %s\n",command_index, command[command_index][0]);
+			set_mode(command[command_index]);
+			command_index++; //while loop!
+			continue;
+		}
+
+		if (strcasecmp(command[command_index][0],"exit")==0) { //check exit
+			printf("Executing command %d: %s\n",command_index, command[command_index][0]);
+			set_exit(command[command_index]);
+			command_index++; //while loop!
+			continue;
+		}	
+	
+	       //execv just exits once its done! hence must call a child process
+		fflush(stdout);
+		pid_t pid = fork();
+		
+		if (pid==0) { //make child execute command
+			printf("\nExecuting command %d: %s\n",command_index, command[command_index][0]);
+			if(execv(command[command_index][0],command[command_index]) < 0) {
+				printf("\tError! Command not found!: %s\n", command[command_index][0]);
+				exit(-1); //have to stop the child process! kill it.. 
+			}
+		}
+	command_index++;      
+	}
+	int childrv;
+	int j = 0;
+	for (; j<children; j++) wait(&childrv);	
 }
 
 
