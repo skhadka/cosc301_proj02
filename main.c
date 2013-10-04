@@ -14,10 +14,11 @@
 int mode = 1;
 int actual_mode = 1;
 int ex = 1;
+int full_path = 1; //implement adding full path to commands
 
 
 /* Make array of commands */
-char ***command(char * buffer) {//return array of addresses, that contains array of strings
+char ***command(char * buffer, char ** path, int * len) {//return array of addresses, that contains array of strings
 
 	char *sep_command = ";\n"; //commands seperated by ; and \n
 	char *word, *tmp;
@@ -61,7 +62,6 @@ char ***command(char * buffer) {//return array of addresses, that contains array
 	if (actual_command_count==0) return NULL; 
 
 	char *** command = (char ***) malloc (sizeof(char **)*(actual_command_count+1));
-	//memset (command, 0, sizeof(command)); //initialize all!!
 
 	int command_index = 0;
 	for (i=0; i<command_count; i++) { //make array of commands and free previous commmand with spc
@@ -70,7 +70,7 @@ char ***command(char * buffer) {//return array of addresses, that contains array
 			continue;
 		}
 		command[command_index] = (char **)malloc(sizeof(char *) * (command_size[i]+1));
-		//memset (command[command_index], 0, sizeof(command[command_index]));
+
 		int j=0;
 		char *s = strdup(command_spc[i]);
 		word = strtok_r(s, sep_spc, &tmp);
@@ -85,7 +85,44 @@ char ***command(char * buffer) {//return array of addresses, that contains array
 	} 
 	free(command_spc[i]);//all command_spc are freed!
 	command[command_index] = NULL;	
-		
+	
+	if (full_path) { //have to add full path to the commands
+
+		i = 0;
+		while(command[i]!=NULL) {
+			if ((strcasecmp(command[i][0],"mode")==0) && (strcasecmp(command[i][0],"exit")==0))  {
+				i++; 
+				continue;
+			}		
+			struct stat stateresult;
+			int rv = stat(command[i][0], &stateresult);
+			if (rv==0) continue; //else change the command[i][0]
+			else { //try to find match in path array
+				int j = 0;	
+				int lenc = (int) strlen(command[i][0]);
+				while (path[j]!=NULL) {
+					int lent = len[j]+lenc + 2;
+					char * s = (char *) malloc(sizeof(char)*lent);
+					s = memcpy (s, path[j],len[j]);
+					s[len[j]] = '/';
+					int k = len[j]+1;
+					for (; k<lent; k++) s[k] = command[i][0][(k-len[j]-1)];	
+					//s[lent-1] = '\0';			
+					//s = memcpy (s+len[j]+1, command[i][0], lenc+1); //lenc+1 includes null term: didn't work?!
+					rv = stat(s, &stateresult);
+					if (rv==0) { //found path match -> add path to the command then break i.e continue checking with other commands;
+						free(command[i][0]);
+						command[i][0] = strdup(s);
+						free(s);
+						break;
+					}
+					free(s);
+					j++;
+				}				
+			}
+			i++;	 
+		} //finished checking all commands
+	}	
 	return command;	 
 }
 
@@ -230,13 +267,38 @@ void free_array(char *** command_array) {
  
 int main(int argc, char **argv) {
   
+	char *path[10]; //assuming shell-config has max 10 lines
+	int len[10]; //keep track of length of each path[i]
+	FILE *datafile = NULL;
+	datafile = fopen ("shell-config", "r");
+	if (datafile==NULL) full_path = 0;
+	else { //read contents of path and put it in an array
+		int i = 0;
+		char item[126]; 
+		while (fgets(item, 126, datafile)!=NULL) { //get rid of spaces and such from the input file 
+			const char * spc = " \n\t";
+			char* tmp;
+			char* word;
+			for(word=strtok_r(item,spc,&tmp); word!=NULL; word=strtok_r(NULL,spc,&tmp)) {
+				path[i] = strdup(word); // <--------------------------remember to free it later
+				len[i] = (int) strlen(path[i]);
+				break; //file should only have 1 path per line
+			}
+			i++;
+		}
+		path[i]= NULL;
+	}
+	fclose(datafile);
+
+
 	printf("%s","prompt:> ");
 	fflush(stdout);
 	char buffer[1024];
 	while(fgets(buffer, 1024, stdin)!=NULL) { 
 
 		//make an array of commands	
-		char ***command_array = command(buffer); //recall it returns malloced stuff so have to free it!
+		char ***command_array = command(buffer, path, len); //recall it returns malloced stuff so have to free it!
+	
 		if (command_array==NULL) {printf("\n%s","prompt:> "); continue;} //no commands to be executed
 		
 		if (actual_mode) execute_sequential(command_array);
@@ -247,6 +309,14 @@ int main(int argc, char **argv) {
 		if (!ex) break; //break if global exit set to 0
 		printf("\n%s","prompt:> ");
 		fflush(stdout); 	
+	}
+
+	if (full_path) { //free path
+		int i = 0;
+		while (path[i]!=NULL) {
+			free(path[i]);
+			i++;	
+		}
 	}
 	printf("\n\n------------------------Finished Execution!------------------------\n\n");
 	return 0;
