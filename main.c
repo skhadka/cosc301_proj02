@@ -254,6 +254,8 @@ void set_exit(char ** command) {
 	if (command[1]!=NULL) { printf("\n\tError! Incorrect parameters for exit function!\n"); return;}
 	if (background_commands!=NULL) {
 		printf("\n\tError! Cannot exit when background processes are running in parallel mode! Switch to parallel mode to stop jobs and exit!\n");
+		printf("\n%s","prompt:> ");
+		fflush(stdin);
 		return;
 	}
 	ex = 0; //set global exit variable to 0 
@@ -293,6 +295,8 @@ void execute_sequential(char ***command) {
 				exit(-1); //have to stop the child process! kill it.. 
 			}
 		}
+	printf("\n%s","prompt:> "); //for main prompt		
+	fflush(stdout);
 	command_index++;      
 	}
 }
@@ -454,7 +458,7 @@ void execute_parallel(char *** command) {
 		}	
 		free(pid_com); 
 	}
-	//printf("%d: null check1\n",background_commands==NULL);	
+
 	if(jobs!=-1) {
 		printf("\nExecuting command %d: jobs\n", jobs); 
 		getjobs(); //display the jobs only after running all other process
@@ -534,7 +538,7 @@ int main(int argc, char **argv) {
 			actual_mode = mode; //set actual mode to the interm one assigned by set_mode fxn
 			if (background_commands!=NULL) { //parallel background commands in sequential mode
 				struct node * head = background_commands;	
-				while (head!=NULL) {
+				/*while (head!=NULL) { //only checks for completion when a command is entered!! check continuously
 					int childrv;
 					pid_t pid = waitpid(head->pid, &childrv, WNOHANG);
 					if (pid==-1) { //no more childs! empty background command list
@@ -554,11 +558,49 @@ int main(int argc, char **argv) {
 						head=head->next;
 						continue;
 					}
+				}*/
+				int redo = 0;
+				while (head!=NULL) { //-----------------Loop1	
+				int childrv;
+				pid_t pid = waitpid(-1, &childrv, WNOHANG); //wait a bit for the process?	
+				if (pid==-1) { //all executions have been done! empty background_commands if any
+					struct node * head = background_commands;
+					while(head!=NULL) {
+						free(head->command);
+						background_commands = head->next;
+						free(head);
+						head = background_commands;
+					}
+					break;
+				} else if (pid>0) { //child complete ->display finale statement and empty from background
+					print_background(pid);
+					list_delete(pid, &background_commands);
+					head = background_commands;
+					printf("\n%s","prompt:> ");
+					fflush(stdout);
+				} else {//process not complete take stdin while it runs in the background
+					struct pollfd pfd;
+					pfd.fd = 0; //stdin is file descriptor 0
+					pfd.events = POLLIN;
+					pfd.revents = 0;
+					fflush(stdout); 
+					int rv = poll (&pfd , 1, 1000);	
+					if (rv == 0) { //timeout -> check process completetion again
+						continue; //goes to Loop1
+					} else if (rv > 0) { //input in stdin
+						redo = 1;
+						break; //read the stdin input buffer
+					} else {
+						printf ("\tError in reading stdin!\n");
+					} 					
 				}
 			}
-			if (!ex) break; //break if global exit set to 0	
-			printf("\n%s","prompt:> ");
-			fflush(stdin);
+			if (redo) 
+				continue; 
+		}
+		if (!ex) break; //break if global exit set to 0	
+		printf("\n%s","prompt:> ");
+		fflush(stdin);
 		}
 		else { /**********Parallel*************/
 			execute_parallel(command_array);
