@@ -1,5 +1,5 @@
 //Shreeya Khadka
-
+//Project 2
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,7 +13,6 @@
 #include <sys/stat.h>
 #include <poll.h>
 #include <signal.h>
-//#define GNU_SOURCE
 
 
 int mode = 1;
@@ -22,7 +21,7 @@ int ex = 1;
 int full_path = 1; //implement adding full path to commands
 struct node * background_commands = NULL; //save background commands and pids
 
-struct pid_command {
+struct pid_command { //make a seperate array of pid's and commands before execution 
 	pid_t pid;
 	char ** command;
 };
@@ -30,6 +29,7 @@ struct pid_command {
 struct node {
 	pid_t pid;
 	char * command;
+	int running;
 	struct node *next;
 };
 
@@ -52,12 +52,13 @@ void list_insert(struct pid_command pid_com) {
 	struct node * n = malloc(sizeof(struct node));
 	n->command = strdup((pid_com.command)[0]); //keep only main commands in heap//have to free it!
 	n->pid = pid_com.pid;
+	n->running = 1;
 	n->next = background_commands;
 	background_commands = n;
 }
 
 
-/* For parallel: delete commands once executed*/ 
+/* For parallel: delete background commands once executed*/ 
 
 int list_delete(pid_t pid, struct node **head) {
  	if (head==NULL) return 0; 
@@ -95,8 +96,7 @@ void print_background(pid_t pid) {
 	struct node * head = background_commands;
 	while (head!=NULL) {
 		if ((head->pid)==pid) { //found match
-			printf("Finished execution> pid: %d, command: %s\n",head->pid, head->command);
-			//print_command(head->command);
+			printf("\n\tFinished execution> pid: %d, command: %s\n",head->pid, head->command);
 			return;
 		}
 	head = head->next;
@@ -152,13 +152,12 @@ char ***command(char * buffer, char ** path, int * len) {//return array of addre
 	char *** command = (char ***) malloc (sizeof(char **)*(actual_command_count+1));
 
 	int command_index = 0;
-	for (i=0; i<command_count; i++) { //make array of commands and free previous commmand with spc
+	for (i=0; i<command_count; i++) { //make array of commands and free previous commmand with spc -- wait don't free it pass it to the background_commands for printing
 		if (command_size[i]==0) {
 			free (command_spc[i]); 
 			continue;
 		}
 		command[command_index] = (char **)malloc(sizeof(char *) * (command_size[i]+1));
-
 		int j=0;
 		char *s = strdup(command_spc[i]);
 		word = strtok_r(s, sep_spc, &tmp);
@@ -171,14 +170,13 @@ char ***command(char * buffer, char ** path, int * len) {//return array of addre
 		command_index++;
 		free(command_spc[i]);
 	} 
-	free(command_spc[i]);//all command_spc are freed!
+	free(command_spc[i]); //all command_spc are freed!
 	command[command_index] = NULL;	
 	
 	if (full_path) { //have to add full path to the commands
-
 		i = 0;
 		while(command[i]!=NULL) {
-			if ((strcmp(command[i][0],"mode")==0) && (strcmp(command[i][0],"exit")==0) )  {
+			if ((strcmp(command[i][0],"mode")==0) || (strcmp(command[i][0],"exit")==0))  {
 				i++; 
 				continue;
 			}		
@@ -202,8 +200,6 @@ char ***command(char * buffer, char ** path, int * len) {//return array of addre
 					s[len[j]] = '/';
 					int k = len[j]+1;
 					for (; k<lent; k++) s[k] = command[i][0][(k-len[j]-1)];	
-					//s[lent-1] = '\0';			
-					//s = memcpy (s+len[j]+1, command[i][0], lenc+1); //lenc+1 includes null term: didn't work?!
 					rv = stat(s, &stateresult);
 					if (rv==0) { //found path match -> add path to the command then break i.e continue checking with other commands;
 						free(command[i][0]);
@@ -228,19 +224,14 @@ char ***command(char * buffer, char ** path, int * len) {//return array of addre
 void set_mode(char ** command) {
  
 	if (command[1]==NULL) { //print mode
-		if (actual_mode==1) printf("\tMode is Sequential--\n");
-		if (actual_mode==0) printf("\tMode is Parallel--\n");
+		if (actual_mode==1) printf("\tMode is Sequential!\n");
+		if (actual_mode==0) printf("\tMode is Parallel!\n");
 		return;
 	}
 	
 	if (command[2]!=NULL) { 
-		printf("\tError! Incorrect parameters for mode function!\n"); 
+		printf("\n\tError! Incorrect parameters for mode function!\n"); 
 		return; 
-	}
-
-	if ((!actual_mode) && (background_commands!=NULL)) { //if parallel mode and background process are running
-		printf("\tError! Cannot change the mode when background processes are running!\n");
-		return;
 	}
 
 	if ((strcmp(command[1],"parallel")==0) || (strcmp(command[1],"p")==0)) {
@@ -253,16 +244,16 @@ void set_mode(char ** command) {
 		return;
 	}
 
-	printf("\tError! Incorrect parameters for mode function!\n");
+	printf("\n\tError! Incorrect parameters for mode function!\n");
 }
 
 
 /* Set global exit variable */
 
 void set_exit(char ** command) {
-	if (command[1]!=NULL) { printf("\tError! Incorrect parameters for exit function!\n"); return;}
-	if ((!actual_mode) && (background_commands!=NULL)) {
-		printf("\tError! Cannot exit when background processes are running!\n");
+	if (command[1]!=NULL) { printf("\n\tError! Incorrect parameters for exit function!\n"); return;}
+	if (background_commands!=NULL) {
+		printf("\n\tError! Cannot exit when background processes are running in parallel mode! Switch to parallel mode to stop jobs and exit!\n");
 		return;
 	}
 	ex = 0; //set global exit variable to 0 
@@ -297,7 +288,7 @@ void execute_sequential(char ***command) {
 		if (pid>0) waitpid(pid, &childrv, 0); //if parent wait for the child to be executed before continuing
 		if (pid==0) { //make child execute command
 			if(execv(command[command_index][0],command[command_index]) < 0) {
-				printf("\tError! Command not found!: ");
+				printf("\n\tError! Command not found!: ");
 				print_command(command[command_index]);
 				exit(-1); //have to stop the child process! kill it.. 
 			}
@@ -317,34 +308,31 @@ void getjobs() {
 	printf("\nPID\tstatus\tcommand\n");
 	if (background_commands==NULL) {
 		//printf("BCG NULL\n");
-		return;
+		return; //no BCG jobs
 	}
 	struct node * head = background_commands;
 	while (head!=NULL) {
 		pid_t pid = head->pid;
 		int childrv;
 		int alive = waitpid(pid, &childrv, WNOHANG);
-		//printf("alive: %d",alive);
-		if (alive==-1) //zombies and finished all
+		if (alive==-1) // finished all
 			break;
 		if (alive==0) {	//is alive
-			if (WIFSTOPPED(childrv)) printf("%d\t%s\t%s\n",pid,"paused",head->command); //paused	
+			if (!(head->running)) printf("%d\t%s\t%s\n",pid,"paused",head->command); //paused	
 			else printf("%d\t%s\t%s\n",pid,"running",head->command);	
 		}
 		head = head->next;
 	}
-	printf("\n");	
+	printf("\n");
 }
 
 
 /* Run commands in Parallel mode */
 
 void execute_parallel(char *** command) {
-	printf("---IN PARALLEL---\n");
 	int command_index = 0;
 	int children = 0;
     struct pid_command * pid_com = NULL;
-	//first count the number of execv commands in array as we'd need to make those many child processes
 	while (command[command_index]!=NULL) {
 		if ((strcmp(command[command_index][0],"mode")!=0) && (strcmp(command[command_index][0],"exit")!=0) && (strcmp(command[command_index][0],"jobs")!=0) && (strcmp(command[command_index][0],"pause")!=0) && (strcmp(command[command_index][0],"resume")!=0)) {
 			children++;
@@ -362,65 +350,101 @@ void execute_parallel(char *** command) {
 
 	while(command[command_index]!=NULL) { //execute commands	
 	
+		printf("\nExecuting command %d: ",command_index);
+		print_command(command[command_index]);
+		printf("\n%s","prompt:> "); //for main prompt
+		fflush(stdout);
+
 		if (strcmp(command[command_index][0],"jobs")==0) {
-			if (command[command_index][1]!=NULL) printf("Error! Incorrect parameters for jobs command\n");
+			if (command[command_index][1]!=NULL) printf("\n\tError! Incorrect parameters for jobs command\n");
 			else jobs=command_index;
 			command_index++;
+			printf("\n%s","prompt:> "); //for main prompt
+			fflush(stdout); 
 			continue;
 		}	
 
-		printf("\nExecuting command %d: ",command_index);
-		print_command(command[command_index]);
 
 		if (strcmp(command[command_index][0],"pause")==0) {//handles pause command
 			if (command[command_index][2]!=NULL) {
-				printf("Error! Incorrect parameters for pause command\n");
+				printf("\n\tError! Incorrect parameters for pause command\n");
 			}
 			pid_t pid = (pid_t) atoi(command[command_index][1]);
 			int status = kill(pid, SIGSTOP);
-			if (status==-1) printf("\tPID not found!\n");
-			command_index++;	
+			if (status==-1) printf("\n\tPID not found!\n");
+			else {
+				struct node * head = background_commands;
+				while (head!=NULL) {
+					if((head->pid)==pid) { //if its not there then program must have been finished
+						head->running = 0;
+						break;
+					}
+				head = head->next;
+				}
+			}
+			command_index++;
+			printf("\n%s","prompt:> "); //for main prompt
+			fflush(stdout); 	
 			continue;
 		}
 
 		if (strcmp(command[command_index][0],"resume")==0) {//handles resume command
 			if (command[command_index][2]!=NULL) {
-				printf("Error! Incorrect parameters for pause command\n");
+				printf("\n\tError! Incorrect parameters for pause command\n");
 			}
 			pid_t pid = (pid_t) atoi(command[command_index][1]);
 			int status = kill(pid, SIGCONT);
-			if (status==-1) printf("\tPID not found!\n");
-			command_index++;	
+			if (status==-1) printf("\n\tPID not found!\n");
+			else {
+				struct node * head = background_commands;
+				while (head!=NULL) {
+					if((head->pid)==pid) { //if its not there then program must have been finished
+						head->running = 1;
+						break;
+					}
+				head = head->next;
+				}
+			}
+			command_index++;
+			printf("\n%s","prompt:> "); //for main prompt
+			fflush(stdout); 
 			continue;
 		}
 
 		if (strcmp(command[command_index][0],"mode")==0) { //check mode
 			set_mode(command[command_index]);
 			command_index++; //while loop!
+			printf("\n%s","prompt:> "); //for main prompt
+			fflush(stdout); 
 			continue;
 		}
 
 		if (strcmp(command[command_index][0],"exit")==0) { //check exit
 			set_exit(command[command_index]);
 			command_index++; //while loop!
+			printf("\n%s","prompt:> "); //for main prompt
+			fflush(stdout);
 			continue;
 		}	
 	
 	     //execv just exits once its done! hence must call a child process
 
 		(pid_com[pid_index]).command = command[command_index];
+		//(pid_com[pid_index]).running = 1;
 		fflush(stdout);
 		(pid_com[pid_index]).pid = fork();
 		if ((pid_com[pid_index]).pid==0) { //make child execute command and add pid[pid_index] to background command list
 			//list_insert(pid_com[pid_index]); //will only change child's background_commands which is not accessible
 			if(execv(command[command_index][0],command[command_index]) < 0) {
-				printf("\tError! Command not found!: ");
+				printf("\n\tError! Command not found!: ");
 				print_command(command[command_index]);
+				printf("\n%s","prompt:> "); //for main prompt
+				fflush(stdout);
 				exit(-1); //have to stop the child process! kill it.. 
 			}
 		}
-	pid_index++;
-	command_index++; 
+		pid_index++;
+		command_index++;
 	}
 	if (children!=0) {
 		(pid_com[children]).command= NULL;
@@ -434,6 +458,8 @@ void execute_parallel(char *** command) {
 	if(jobs!=-1) {
 		printf("\nExecuting command %d: jobs\n", jobs); 
 		getjobs(); //display the jobs only after running all other process
+		printf("\n%s","prompt:> "); //for main prompt
+		fflush(stdout);
 	} 
 }
 
@@ -460,14 +486,14 @@ void free_array(char *** command_array) {
  
 int main(int argc, char **argv) {
   
-	char *path[1025]; //assuming shell-config has max 1024 lines
-	int len[1025]; //keep track of length of each path[i]
+	char *path[1024]; //assuming shell-config has max 1024 lines
+	int len[1024]; //keep track of length of each path[i]
 	FILE *datafile = NULL;
 	datafile = fopen ("shell-config", "r");
 	if (datafile==NULL) full_path = 0;
 	else { //read contents of path file and put it in an array
 		int i = 0;
-		char item[126]; 
+		char item[126]; //pathlength max=125
 		while (fgets(item, 126, datafile)!=NULL) { //get rid of spaces and such from the input file 
 			const char * spc = " \n\t";
 			char* tmp;
@@ -478,8 +504,8 @@ int main(int argc, char **argv) {
 				i++; //avoid reading empty lines!
 				break; //file should have only have 1 path per line
 			}
-			if (i==1024) {
-				printf("Program can only parse maximum of 1024 paths in the shell-config file\n\tParsed first 1024 paths in shell-config\n");
+			if (i==1023) {
+				printf("Program can only parse maximum of 1023 paths in the shell-config file\n\tParsed first 1023 paths in shell-config\n");
 			break;
 			}  
 		}
@@ -506,36 +532,45 @@ int main(int argc, char **argv) {
 			free_array(command_array);
 			free(command_array);
 			actual_mode = mode; //set actual mode to the interm one assigned by set_mode fxn
+			if (background_commands!=NULL) { //parallel background commands in sequential mode
+				struct node * head = background_commands;	
+				while (head!=NULL) {
+					int childrv;
+					pid_t pid = waitpid(head->pid, &childrv, WNOHANG);
+					if (pid==-1) { //no more childs! empty background command list
+						while(head!=NULL) {
+						free(head->command);
+						background_commands = head->next;
+						free(head);
+						head = background_commands;
+						}
+					} else if (pid>0) {//child is dead! remove from background
+						print_background(pid);
+						list_delete(pid, &background_commands);
+						head = background_commands;
+						printf("\n%s","prompt:> ");
+						fflush(stdout);
+					} else { //child is still running check for another child
+						head=head->next;
+						continue;
+					}
+				}
+			}
 			if (!ex) break; //break if global exit set to 0	
+			printf("\n%s","prompt:> ");
+			fflush(stdin);
 		}
 		else { /**********Parallel*************/
 			execute_parallel(command_array);
-
-			struct node * head = background_commands;	
 			free_array(command_array);
 			free(command_array);
-
 			int redo = 0;
-			while (head!=NULL) {
-				//-----------------Loop1	
-				struct pollfd pfd, pfdout;
-
-
-				pfd.fd = 0; //stdin is file descriptor 0
-				pfd.events = POLLIN;
-				pfd.revents = 0;
-
-				pfdout.fd = 1; // file descriptor for stdout
-				pfdout.events = POLLOUT;
-				pfdout.revents = 0;
-				
-				int childrv1;
-				fflush(stdout);
-				int rvout = poll (&pfdout, 1, 1000);
-				pid_t pid = waitpid(-1, &childrv1, 0);
+			struct node * head = background_commands;
+			while (head!=NULL) { //-----------------Loop1	
+				int childrv;
+				pid_t pid = waitpid(-1, &childrv, WNOHANG); //wait a bit for the process?	
 				if (pid==-1) { //all executions have been done! empty background_commands if any
 					struct node * head = background_commands;
-					//struct node * trial = head;
 					while(head!=NULL) {
 						free(head->command);
 						background_commands = head->next;
@@ -543,39 +578,37 @@ int main(int argc, char **argv) {
 						head = background_commands;
 					}
 					break;
-				}
-				print_background(pid);
-				//printf("pid: %d",pid);
-				//int del = list_delete(pid, &background_commands);
-				list_delete(pid, &background_commands);
-				//printf("After Delete: %d\n",del);
-				head = background_commands;
-				//printf("null? %d\n",background_commands==NULL);			
-				if (rvout==0) { //stout timeout -> take stdin
+				} else if (pid>0) { //child complete ->display finale statement and empty from background
+					print_background(pid);
+					list_delete(pid, &background_commands);
+					head = background_commands;
 					printf("\n%s","prompt:> ");
+					fflush(stdout);
+				} else {//process not complete take stdin while it runs in the background
+					struct pollfd pfd;
+					pfd.fd = 0; //stdin is file descriptor 0
+					pfd.events = POLLIN;
+					pfd.revents = 0;
 					fflush(stdout); 
 					int rv = poll (&pfd , 1, 1000);	
-					if (rv == 0) { //timeout -> do output again
+					if (rv == 0) { //timeout -> check process completetion again
 						continue; //goes to Loop1
 					} else if (rv > 0) { //input in stdin
 						redo = 1;
 						break; //read the stdin input buffer
 					} else {
 						printf ("\tError in reading stdin!\n");
-					} 
-					
-				}		
+					} 					
+				}
+				
 			} //out of Loop1
-		
-			if (redo) continue; //continues onto main fgets loop
+			actual_mode = mode; //set the global mode to interim one
+			if (redo) {
+				continue; //continues onto main fgets loop
+			}
 		}
-
-		/*CHANGE MODE AND EX ONLY AFTER ALL THE BACKGROUND PROCESSES ARE DONE RUNNING!!*/
 		if (!ex) break; //break if global exit set to 0
-		//printf("%d: null check after\n",background_commands==NULL);	
-		printf("\n%s","prompt:> ");
-		fflush(stdout); 
-	}
+	} //fgets while ends here
 	if (full_path) { //free path
 		int i = 0;
 		while (path[i]!=NULL) {
